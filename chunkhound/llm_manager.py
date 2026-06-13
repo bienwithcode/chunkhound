@@ -22,6 +22,8 @@ from chunkhound.providers.llm.gemini_llm_provider import GeminiLLMProvider
 from chunkhound.providers.llm.openai_compatible_provider import OpenAICompatibleProvider
 from chunkhound.providers.llm.openai_llm_provider import OpenAILLMProvider
 from chunkhound.providers.llm.opencode_cli_provider import OpenCodeCLIProvider
+from chunkhound.providers.llm.antigravity_llm_provider import AntigravityLLMProvider
+from chunkhound.providers.llm.antigravity_cli_provider import AntigravityCLIProvider
 
 
 class LLMManager:
@@ -32,7 +34,6 @@ class LLMManager:
     - Synthesis provider: For high-quality, large-context operations (final analysis)
     """
 
-    # Registry of available providers
     _providers: dict[str, type[LLMProvider] | Any] = {
         "openai": OpenAILLMProvider,
         "anthropic": AnthropicLLMProvider,
@@ -40,6 +41,8 @@ class LLMManager:
         "codex-cli": CodexCLIProvider,
         "gemini": GeminiLLMProvider,
         "opencode-cli": OpenCodeCLIProvider,
+        "antigravity-sdk": AntigravityLLMProvider,
+        "antigravity-cli": AntigravityCLIProvider,
     }
 
     def __init__(
