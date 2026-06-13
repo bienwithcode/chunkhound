@@ -264,7 +264,7 @@ class TestAntigravityCLIRunCommand:
         assert "--print" in args
         assert "--model" in args
         assert "gemini-3.5-flash" in args
-        assert "--dangerously-skip-permissions" in args
+        assert "--sandbox" in args
         
         # Verify merged prompt is passed as argument
         expected_prompt = provider._merge_prompts("hello cli", "be quick")

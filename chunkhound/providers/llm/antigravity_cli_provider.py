@@ -22,7 +22,7 @@ class AntigravityCLIProvider(BaseCLIProvider):
         cmd = ["agy", "--print"]
         if self._model and self._model != "default" and self._model != "":
             cmd.extend(["--model", self._model])
-        cmd.append("--dangerously-skip-permissions")
+        cmd.append("--sandbox")
 
         merged_prompt = self._merge_prompts(prompt, system)
         cmd.append(merged_prompt)
