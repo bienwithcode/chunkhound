@@ -44,6 +44,7 @@ class AntigravityLLMProvider(LLMProvider):
         self._model = model
         self._timeout = timeout
         self._max_retries = max_retries
+        self._target_dir = kwargs.get("target_dir")
         self._extra_kwargs = kwargs
 
         # Usage statistics tracking
@@ -103,7 +104,7 @@ class AntigravityLLMProvider(LLMProvider):
             "model": self._model,
             "api_key": self._api_key,
             "capabilities": capabilities,
-            "workspaces": [os.getcwd()],
+            "workspaces": [str(self._target_dir)] if self._target_dir else [os.getcwd()],
             "policies": policies,
         }
         if system:
@@ -423,16 +424,32 @@ class AntigravityLLMProvider(LLMProvider):
                 # Extract structured output if supported
                 if hasattr(response, "structured_output"):
                     result = await response.structured_output()
-                    if isinstance(result, dict):
-                        import json
+                    if result is not None:
+                        result_dict = None
+                        if isinstance(result, dict):
+                            result_dict = result
+                        elif hasattr(result, "model_dump"):
+                            result_dict = result.model_dump()
+                        elif hasattr(result, "dict"):
+                            result_dict = result.dict()
+                        elif hasattr(result, "__dict__"):
+                            result_dict = result.__dict__
+                        else:
+                            try:
+                                result_dict = dict(result)
+                            except (TypeError, ValueError):
+                                pass
 
-                        from chunkhound.utils.json_extraction import (
-                            parse_and_validate_structured_json,
-                        )
+                        if result_dict is not None:
+                            import json
 
-                        return parse_and_validate_structured_json(
-                            json.dumps(result), json_schema
-                        )
+                            from chunkhound.utils.json_extraction import (
+                                parse_and_validate_structured_json,
+                            )
+
+                            return parse_and_validate_structured_json(
+                                json.dumps(result_dict), json_schema
+                            )
 
                 # Fallback to parsing text output
                 content = await response.text()

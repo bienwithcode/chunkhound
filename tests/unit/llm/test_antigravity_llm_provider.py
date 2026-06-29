@@ -592,3 +592,55 @@ def test_sdk_compile_schema_to_pydantic_constraints():
     # Forbidden extra properties (additionalProperties=False)
     with pytest.raises(ValidationError):
         model_cls(num_val=3.0, enum_val="red", extra_field="forbidden")
+
+
+@pytest.mark.asyncio
+async def test_sdk_target_dir_propagation(mock_antigravity_agent):
+    provider = AntigravityLLMProvider(
+        api_key="test-api-key",
+        model="gemini-3.5-flash",
+        target_dir="/test/project/root"
+    )
+
+    agent_mock = _make_agent_mock(mock_antigravity_agent)
+    resp_mock, conv_mock = _make_sdk_response("Hello")
+    agent_mock.chat = AsyncMock(return_value=resp_mock)
+    agent_mock.conversation = conv_mock
+
+    await provider.complete("Test prompt")
+
+    mock_antigravity_agent.assert_called_once()
+    config_passed = mock_antigravity_agent.call_args[1].get("config")
+    assert config_passed.workspaces == ["/test/project/root"]
+
+
+@pytest.mark.asyncio
+async def test_sdk_structured_pydantic_model(mock_antigravity_agent):
+    provider = AntigravityLLMProvider(api_key="test-api-key", model="gemini-3.5-flash")
+
+    agent_mock = _make_agent_mock(mock_antigravity_agent)
+    resp_mock, conv_mock = _make_sdk_response("{}", thoughts="Structured output Pydantic...")
+
+    # Mock structured_output to return a mock object behaving like Pydantic model
+    mock_pydantic_instance = MagicMock()
+    mock_pydantic_instance.model_dump = MagicMock(return_value={"key": "val"})
+    # Delete dict method to make sure model_dump is called
+    if hasattr(mock_pydantic_instance, "dict"):
+        delattr(mock_pydantic_instance, "dict")
+
+    resp_mock.structured_output = AsyncMock(return_value=mock_pydantic_instance)
+
+    agent_mock.chat = AsyncMock(return_value=resp_mock)
+    agent_mock.conversation = conv_mock
+
+    schema = {
+        "type": "object",
+        "properties": {"key": {"type": "string"}},
+        "required": ["key"],
+    }
+
+    result = await provider.complete_structured("Structured prompt", json_schema=schema)
+
+    assert isinstance(result, dict)
+    assert result == {"key": "val"}
+    mock_pydantic_instance.model_dump.assert_called_once()

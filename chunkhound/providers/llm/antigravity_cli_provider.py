@@ -161,16 +161,13 @@ class AntigravityCLIProvider(BaseCLIProvider):
                 raise RuntimeError(f"Antigravity CLI execution failed: {e}") from e
             raise
         finally:
-            if process and process.returncode is None:
+            if process:
                 await self._kill_process_tree(process, pgid=captured_process_pid)
 
     async def _kill_process_tree(
         self, process: asyncio.subprocess.Process, *, pgid: int | None = None
     ) -> None:
         """Terminate an antigravity subprocess and its descendants."""
-        if process.returncode is not None:
-            return
-
         if sys.platform == "win32":
             try:
                 await asyncio.to_thread(
@@ -198,16 +195,15 @@ class AntigravityCLIProvider(BaseCLIProvider):
         except (asyncio.TimeoutError, ProcessLookupError):
             pass
 
-        if process.returncode is None:
-            try:
-                os.killpg(process_group_id, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
+        try:
+            os.killpg(process_group_id, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
 
-            try:
-                await asyncio.wait_for(process.wait(), timeout=5)
-            except (asyncio.TimeoutError, ProcessLookupError):
-                pass
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5)
+        except (asyncio.TimeoutError, ProcessLookupError):
+            pass
 
     def get_synthesis_concurrency(self) -> int:
         """Get recommended concurrency for parallel synthesis operations."""

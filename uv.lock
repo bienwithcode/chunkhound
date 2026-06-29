@@ -476,7 +476,6 @@ dependencies = [
     { name = "aiohttp" },
     { name = "anthropic" },
     { name = "duckdb" },
-    { name = "google-antigravity" },
     { name = "google-genai" },
     { name = "httpx" },
     { name = "jsonschema" },
@@ -543,6 +542,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+antigravity = [
+    { name = "google-antigravity" },
+]
 dev = [
     { name = "black" },
     { name = "mypy" },
@@ -580,7 +582,7 @@ requires-dist = [
     { name = "anthropic", specifier = ">=0.96.0,<1.0.0" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=23.0.0" },
     { name = "duckdb", specifier = "==1.4.4" },
-    { name = "google-antigravity", specifier = ">=0.1.3" },
+    { name = "google-antigravity", marker = "extra == 'antigravity'", specifier = ">=0.1.3" },
     { name = "google-genai", specifier = ">=1.51.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "jsonschema", specifier = ">=4.0.0" },
@@ -652,7 +654,7 @@ requires-dist = [
     { name = "zendriver", specifier = "==0.15.3" },
     { name = "zstandard", specifier = ">=0.23.0" },
 ]
-provides-extras = ["dev", "native", "test"]
+provides-extras = ["antigravity", "dev", "native", "test"]
 
 [package.metadata.requires-dev]
 dev = [
