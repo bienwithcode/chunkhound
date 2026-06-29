@@ -149,11 +149,15 @@ class AntigravityLLMProvider(LLMProvider):
             )
             async with Agent(config=config) as agent:
                 logger.debug(f"Executing chat prompt (timeout: {request_timeout}s)")
-                response = await asyncio.wait_for(
-                    agent.chat(prompt), timeout=request_timeout
-                )
 
-                content = await response.text()
+                async def _chat_and_drain():
+                    res = await agent.chat(prompt)
+                    cnt = await res.text()
+                    return res, cnt
+
+                response, content = await asyncio.wait_for(
+                    _chat_and_drain(), timeout=request_timeout
+                )
 
                 # Extract thoughts/reasoning tokens
                 thoughts = getattr(response, "thoughts", "")
@@ -369,8 +373,21 @@ class AntigravityLLMProvider(LLMProvider):
                     "Executing chat prompt for structured completion "
                     f"(timeout: {request_timeout}s)"
                 )
-                response = await asyncio.wait_for(
-                    agent.chat(prompt), timeout=request_timeout
+
+                async def _chat_and_drain():
+                    res = await agent.chat(prompt)
+                    structured_val = None
+                    if hasattr(res, "structured_output"):
+                        structured_val = await res.structured_output()
+                    text_content = ""
+                    try:
+                        text_content = await res.text()
+                    except Exception:
+                        pass
+                    return res, structured_val, text_content
+
+                response, structured_val, text_content = await asyncio.wait_for(
+                    _chat_and_drain(), timeout=request_timeout
                 )
 
                 # Retrieve token usage from agent conversation
@@ -408,11 +425,7 @@ class AntigravityLLMProvider(LLMProvider):
                     if system:
                         prompt_tokens += len(system) // 4
                     thoughts = getattr(response, "thoughts", "")
-                    content = ""
-                    try:
-                        content = await response.text()
-                    except Exception:
-                        pass
+                    content = text_content
                     completion_tokens = len(content + thoughts) // 4
                     total_tokens = prompt_tokens + completion_tokens
 
@@ -423,7 +436,7 @@ class AntigravityLLMProvider(LLMProvider):
 
                 # Extract structured output if supported
                 if hasattr(response, "structured_output"):
-                    result = await response.structured_output()
+                    result = structured_val
                     if result is not None:
                         result_dict = None
                         if isinstance(result, dict):
@@ -452,7 +465,7 @@ class AntigravityLLMProvider(LLMProvider):
                             )
 
                 # Fallback to parsing text output
-                content = await response.text()
+                content = text_content
                 from chunkhound.utils.json_extraction import (
                     parse_and_validate_structured_json,
                 )

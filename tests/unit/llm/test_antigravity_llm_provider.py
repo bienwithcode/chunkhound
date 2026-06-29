@@ -263,7 +263,7 @@ async def test_cli_timeout_cleanup(mock_subprocess):
     mock_subprocess.return_value = mock_process
 
     with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()), \
-         patch("os.killpg") as mock_killpg, \
+         patch("os.killpg", create=True) as mock_killpg, \
          patch("subprocess.run") as mock_run:
         with pytest.raises(RuntimeError, match="timed out after 2s"):
             await provider.complete("CLI prompt")
@@ -305,7 +305,12 @@ async def test_sdk_timeout(mock_antigravity_agent):
 
     _make_agent_mock(mock_antigravity_agent)
 
-    with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()) as mock_wait_for:
+    async def mock_wait_for_se(coro, timeout=None):
+        if hasattr(coro, "close"):
+            coro.close()
+        raise asyncio.TimeoutError()
+
+    with patch("asyncio.wait_for", side_effect=mock_wait_for_se) as mock_wait_for:
         with pytest.raises(RuntimeError, match="Antigravity SDK call failed:"):
             await provider.complete("Test prompt", timeout=5)
 
