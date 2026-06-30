@@ -214,12 +214,15 @@ class AntigravityLLMProvider(LLMProvider):
                     model=self._model,
                     finish_reason="stop",
                 )
+        except asyncio.TimeoutError as e:
+            logger.error(f"Antigravity SDK call failed: timed out after {request_timeout}s")
+            raise RuntimeError(f"Antigravity SDK call failed: timed out after {request_timeout}s") from e
         except Exception as e:
             logger.error(f"Antigravity SDK call failed: {e}")
             raise RuntimeError(f"Antigravity SDK call failed: {e}") from e
 
     def _compile_schema_to_pydantic(
-        self, schema: Any, name: str = "DynamicResponseModel"
+        self, schema: Any, name: str = "DynamicResponseModel", defs: dict[str, Any] | None = None
     ) -> Any:
         """Dynamically compile JSON schema to a Pydantic model class.
 
@@ -241,6 +244,9 @@ class AntigravityLLMProvider(LLMProvider):
         if not isinstance(schema, dict):
             return schema
 
+        if defs is None:
+            defs = schema.get("$defs", {})
+
         properties = schema.get("properties", {})
         required = schema.get("required", [])
 
@@ -248,6 +254,14 @@ class AntigravityLLMProvider(LLMProvider):
         for field_name, prop in properties.items():
             if not isinstance(prop, dict):
                 continue
+
+            # Resolve reference if it exists
+            if "$ref" in prop:
+                ref = prop["$ref"]
+                ref_name = ref.split("/")[-1]
+                if defs and ref_name in defs:
+                    prop = defs[ref_name]
+
             prop_type = prop.get("type")
             python_type: Any = Any
 
@@ -258,25 +272,32 @@ class AntigravityLLMProvider(LLMProvider):
             # Handle object
             elif prop_type == "object":
                 python_type = self._compile_schema_to_pydantic(
-                    prop, name=f"{name}_{field_name}"
+                    prop, name=f"{name}_{field_name}", defs=defs
                 )
 
             # Handle array
             elif prop_type == "array":
                 items = prop.get("items")
                 if isinstance(items, dict):
-                    items_type = items.get("type")
+                    if "$ref" in items:
+                        ref = items["$ref"]
+                        ref_name = ref.split("/")[-1]
+                        if defs and ref_name in defs:
+                            items = defs[ref_name]
+                    items_type = items.get("type") if isinstance(items, dict) else None
                     if items_type == "object":
                         item_type = self._compile_schema_to_pydantic(
-                            items, name=f"{name}_{field_name}_item"
+                            items, name=f"{name}_{field_name}_item", defs=defs
                         )
                         python_type = list[item_type]  # type: ignore[valid-type]
-                    elif "enum" in items and isinstance(items["enum"], list):
+                    elif isinstance(items, dict) and "enum" in items and isinstance(items["enum"], list):
                         python_type = list[Literal[tuple(items["enum"])]]  # type: ignore[misc]
                     elif isinstance(items_type, str) and items_type in type_mapping:
                         python_type = list[type_mapping[items_type]]  # type: ignore[valid-type]
                     else:
                         python_type = list
+                else:
+                    python_type = list
 
             # Handle primitive types
             elif isinstance(prop_type, str) and prop_type in type_mapping:
@@ -471,6 +492,9 @@ class AntigravityLLMProvider(LLMProvider):
                 )
 
                 return parse_and_validate_structured_json(content, json_schema)
+        except asyncio.TimeoutError as e:
+            logger.error(f"Antigravity SDK structured call failed: timed out after {request_timeout}s")
+            raise RuntimeError(f"Antigravity SDK structured call failed: timed out after {request_timeout}s") from e
         except Exception as e:
             logger.error(f"Antigravity SDK structured call failed: {e}")
             raise RuntimeError(f"Antigravity SDK structured call failed: {e}") from e

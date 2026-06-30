@@ -7,13 +7,15 @@ import pytest
 
 from chunkhound.interfaces.llm_provider import LLMResponse
 from chunkhound.providers.llm.antigravity_cli_provider import AntigravityCLIProvider
-from chunkhound.providers.llm.antigravity_llm_provider import AntigravityLLMProvider
+from chunkhound.providers.llm.antigravity_llm_provider import SDK_AVAILABLE, AntigravityLLMProvider
 
 
 @pytest.fixture
 def mock_antigravity_agent():
     """Mock the Agent class inside the provider module."""
-    with patch("chunkhound.providers.llm.antigravity_llm_provider.Agent") as mock:
+    if not SDK_AVAILABLE:
+        pytest.skip("google-antigravity SDK is not installed")
+    with patch("chunkhound.providers.llm.antigravity_llm_provider.Agent", create=True) as mock:
         yield mock
 
 
@@ -509,7 +511,7 @@ async def test_sdk_max_completion_tokens_warning(mock_antigravity_agent):
         assert "max_completion_tokens" in mock_warn.call_args[0][0]
 
 
-def test_sdk_compile_schema_to_pydantic_constraints():
+def test_sdk_compile_schema_to_pydantic_constraints(mock_antigravity_agent):
     provider = AntigravityLLMProvider(api_key="test-api-key", model="gemini-3.5-flash")
     schema = {
         "type": "object",

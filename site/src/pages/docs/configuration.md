@@ -247,8 +247,8 @@ The LLM provider is used for deep code research (`chunkhound research` and the `
 > [!NOTE]
 > The `google-antigravity` SDK dependency is optional to keep base installations lightweight and compatible. 
 > If you configure `provider: "antigravity-sdk"`, you must install the optional dependencies:
-> - Using pip: `pip install ".[antigravity]"`
-> - Using uv: `uv pip install -e ".[antigravity]"`
+> - Using pip: `pip install "chunkhound[antigravity]"`
+> - Using uv: `uv pip install "chunkhound[antigravity]"` (or `uv tool install "chunkhound[antigravity]"`)
 
 `"model"` is a convenience shorthand that sets both `utility_model` and `synthesis_model` to the same value. To use different models per role, set `utility_model` and `synthesis_model` explicitly.
 

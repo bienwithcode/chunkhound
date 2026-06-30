@@ -134,7 +134,7 @@ class LLMManager:
             }
             if model_name:
                 provider_kwargs["model"] = model_name
-            if self._target_dir and provider_name == "antigravity-sdk":
+            if getattr(self, "_target_dir", None) and provider_name == "antigravity-sdk":
                 provider_kwargs["target_dir"] = self._target_dir
 
             # Only providers that support custom endpoints should receive base_url.
