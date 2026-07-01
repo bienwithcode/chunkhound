@@ -245,7 +245,7 @@ The LLM provider is used for deep code research (`chunkhound research` and the `
 | Antigravity CLI | `antigravity-cli` | -- | `gemini-3.5-flash` | `gemini-3.1-pro` | Uses local agy / antigravity CLI command |
 
 > [!NOTE]
-> The `google-antigravity` SDK dependency is optional to keep base installations lightweight and compatible. 
+> The `google-antigravity` SDK dependency is optional to keep base installations lightweight and compatible.
 > If you configure `provider: "antigravity-sdk"`, you must install the optional dependencies:
 > - Using pip: `pip install "chunkhound[antigravity]"`
 > - Using uv: `uv pip install "chunkhound[antigravity]"` (or `uv tool install "chunkhound[antigravity]"`)

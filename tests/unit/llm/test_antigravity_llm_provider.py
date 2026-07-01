@@ -199,7 +199,9 @@ async def test_cli_complete_success(mock_subprocess):
 
     # Assert subprocess run CWD and env isolation
     call_kwargs = mock_subprocess.call_args.kwargs
-    assert call_kwargs.get("cwd") == tempfile.gettempdir()
+    cwd_passed = call_kwargs.get("cwd")
+    assert cwd_passed is not None
+    assert "chunkhound-antigravity-" in os.path.basename(cwd_passed)
 
     env_passed = call_kwargs.get("env")
     assert env_passed is not None

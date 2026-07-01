@@ -103,7 +103,7 @@ def test_llm_manager_registry_antigravity_providers():
     assert "antigravity-cli" in LLMManager._providers
 
     manager = object.__new__(LLMManager)
-    
+
     # Mocking classes to capture arguments
     captured_sdk = {}
     captured_cli = {}
@@ -147,4 +147,3 @@ def test_llm_manager_registry_antigravity_providers():
     )
     assert captured_cli["model"] == "gemini-3.1-pro"
     assert captured_cli["timeout"] == 60
-

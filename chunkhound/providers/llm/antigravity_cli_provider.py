@@ -1,4 +1,5 @@
 import asyncio
+from typing import Any
 import os
 import signal
 import subprocess
@@ -71,9 +72,6 @@ class AntigravityCLIProvider(BaseCLIProvider):
             "USER",
             "LOGNAME",
             "USERPROFILE",
-            "TMPDIR",
-            "TMP",
-            "TEMP",
             "TERM",
             "SHELL",
             "LANG",
@@ -95,6 +93,7 @@ class AntigravityCLIProvider(BaseCLIProvider):
 
         process = None
         captured_process_pid: int | None = None
+        temp_dir = tempfile.mkdtemp(prefix="chunkhound-antigravity-")
         try:
             # Create subprocess with neutral CWD to prevent local config scans
             if sys.platform == "win32":
@@ -107,7 +106,7 @@ class AntigravityCLIProvider(BaseCLIProvider):
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     env=env,
-                    cwd=tempfile.gettempdir(),
+                    cwd=temp_dir,
                     creationflags=create_new_process_group,
                 )
             else:
@@ -117,7 +116,7 @@ class AntigravityCLIProvider(BaseCLIProvider):
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     env=env,
-                    cwd=tempfile.gettempdir(),
+                    cwd=temp_dir,
                     start_new_session=True,
                 )
 
@@ -163,6 +162,10 @@ class AntigravityCLIProvider(BaseCLIProvider):
         finally:
             if process:
                 await self._kill_process_tree(process, pgid=captured_process_pid)
+            try:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            except Exception:
+                pass
 
     async def _kill_process_tree(
         self, process: asyncio.subprocess.Process, *, pgid: int | None = None
@@ -170,18 +173,32 @@ class AntigravityCLIProvider(BaseCLIProvider):
         """Terminate an antigravity subprocess and its descendants."""
         if sys.platform == "win32":
             try:
-                await asyncio.to_thread(
+                res = await asyncio.to_thread(
                     subprocess.run,
                     ["taskkill", "/T", "/PID", str(process.pid), "/F"],
+                    capture_output=True,
                     check=False,
                     timeout=10,
                 )
-            except (FileNotFoundError, subprocess.SubprocessError, OSError):
-                logger.debug("Windows taskkill failed during Antigravity CLI cleanup")
+                if res.returncode != 0:
+                    logger.warning(
+                        "Windows taskkill exited with code "
+                        f"{res.returncode}: "
+                        f"{res.stderr.decode('utf-8', errors='ignore')}"
+                    )
+            except (FileNotFoundError, subprocess.SubprocessError, OSError) as e:
+                logger.debug(f"Windows taskkill failed during Antigravity CLI cleanup: {e}")
             try:
                 await asyncio.wait_for(process.wait(), timeout=5)
             except (asyncio.TimeoutError, ProcessLookupError):
-                pass
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5)
+                except (asyncio.TimeoutError, ProcessLookupError):
+                    pass
             return
 
         process_group_id = pgid if pgid is not None else process.pid
@@ -204,6 +221,31 @@ class AntigravityCLIProvider(BaseCLIProvider):
             await asyncio.wait_for(process.wait(), timeout=5)
         except (asyncio.TimeoutError, ProcessLookupError):
             pass
+
+    async def health_check(self) -> dict[str, Any]:
+        """Perform health check by attempting a simple completion.
+
+        This overrides the base class implementation to avoid triggering the
+        max_completion_tokens warning.
+        """
+        try:
+            response = await self.complete(
+                "Say 'OK'",
+                max_completion_tokens=4096,
+                timeout=self.HEALTH_CHECK_TIMEOUT,
+            )
+            return {
+                "status": "healthy",
+                "provider": self.name,
+                "model": self._model,
+                "test_response": response.content[:50],
+            }
+        except Exception as e:
+            return {
+                "status": "unhealthy",
+                "provider": self.name,
+                "error": str(e),
+            }
 
     def get_synthesis_concurrency(self) -> int:
         """Get recommended concurrency for parallel synthesis operations."""

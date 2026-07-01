@@ -133,7 +133,7 @@ class AntigravityLLMProvider(LLMProvider):
         Returns:
             LLMResponse with content and metadata
         """
-        if max_completion_tokens != 4096:
+        if max_completion_tokens is not None and max_completion_tokens != 4096:
             logger.warning(
                 "Antigravity SDK does not support limiting output tokens "
                 "via max_completion_tokens. "
@@ -370,7 +370,7 @@ class AntigravityLLMProvider(LLMProvider):
         Returns:
             Parsed JSON object conforming to schema
         """
-        if max_completion_tokens != 4096:
+        if max_completion_tokens is not None and max_completion_tokens != 4096:
             logger.warning(
                 "Antigravity SDK does not support limiting output tokens "
                 "via max_completion_tokens. "
@@ -523,7 +523,7 @@ class AntigravityLLMProvider(LLMProvider):
     async def health_check(self) -> dict[str, Any]:
         """Perform health check."""
         try:
-            response = await self.complete("ping", max_completion_tokens=5)
+            response = await self.complete("ping", max_completion_tokens=4096)
             return {
                 "status": "healthy",
                 "provider": self.name,
