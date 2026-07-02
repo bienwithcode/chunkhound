@@ -1,7 +1,28 @@
 import asyncio
 import os
+import sys
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
+
+# Mock google-antigravity SDK modules if not installed in the current environment
+try:
+    import google.antigravity
+except ImportError:
+    google_mock = MagicMock()
+    google_antigravity_mock = MagicMock()
+    google_antigravity_hooks_mock = MagicMock()
+    google_antigravity_types_mock = MagicMock()
+
+    class MockBuiltinTools:
+        LIST_DIR = "LIST_DIR"
+        CREATE_FILE = "CREATE_FILE"
+
+    google_antigravity_types_mock.BuiltinTools = MockBuiltinTools
+
+    sys.modules["google"] = google_mock
+    sys.modules["google.antigravity"] = google_antigravity_mock
+    sys.modules["google.antigravity.hooks"] = google_antigravity_hooks_mock
+    sys.modules["google.antigravity.types"] = google_antigravity_types_mock
 
 import pytest
 
@@ -13,8 +34,6 @@ from chunkhound.providers.llm.antigravity_llm_provider import SDK_AVAILABLE, Ant
 @pytest.fixture
 def mock_antigravity_agent():
     """Mock the Agent class inside the provider module."""
-    if not SDK_AVAILABLE:
-        pytest.skip("google-antigravity SDK is not installed")
     with patch("chunkhound.providers.llm.antigravity_llm_provider.Agent", create=True) as mock:
         yield mock
 
@@ -172,13 +191,17 @@ async def test_cli_complete_success(mock_subprocess):
     mock_process.communicate.return_value = (b"Hello from CLI!", b"")
     mock_subprocess.return_value = mock_process
 
-    # Set some test env vars to verify scrubbing
+    # Set some test env vars to verify scrubbing and redirection
     with patch.dict(
         os.environ,
         {
             "CHUNKHOUND_TEST": "1",
             "GOOGLE_APPLICATION_CREDENTIALS": "abc",
             "PATH": "/usr/bin",
+            "HOME": "/home/user",
+            "USERPROFILE": "C:\\Users\\user",
+            "APPDATA": "C:\\Users\\user\\AppData\\Roaming",
+            "LOCALAPPDATA": "C:\\Users\\user\\AppData\\Local",
         },
     ):
         result = await provider.complete("CLI prompt")
@@ -208,6 +231,10 @@ async def test_cli_complete_success(mock_subprocess):
     assert "CHUNKHOUND_TEST" not in env_passed
     assert "GOOGLE_APPLICATION_CREDENTIALS" not in env_passed
     assert env_passed.get("PATH") == "/usr/bin"
+    assert env_passed.get("HOME") == cwd_passed
+    assert env_passed.get("USERPROFILE") == cwd_passed
+    assert env_passed.get("APPDATA") == os.path.join(cwd_passed, "AppData", "Roaming")
+    assert env_passed.get("LOCALAPPDATA") == os.path.join(cwd_passed, "AppData", "Local")
 
 
 @pytest.mark.asyncio
@@ -297,7 +324,7 @@ async def test_cli_contract_probe():
     )
     stdout, stderr = await process.communicate()
     help_output = (stdout + stderr).decode("utf-8", errors="ignore")
-    assert "--print" in help_output or "-p" in help_output, f"Binary '{binary}' help does not document '--print'"
+    assert "--print" in help_output, f"Binary '{binary}' help does not document '--print'"
     assert "--sandbox" in help_output, f"Binary '{binary}' help does not document '--sandbox'"
 
 

@@ -89,11 +89,20 @@ class AntigravityCLIProvider(BaseCLIProvider):
         base_env = {k: v for k, v in os.environ.items() if k in safe_keys}
         env = get_utf8_env(base_env)
 
-        logger.debug(f"Executing CLI command: {' '.join(cmd)} in sandboxed mode")
-
         process = None
         captured_process_pid: int | None = None
         temp_dir = tempfile.mkdtemp(prefix="chunkhound-antigravity-")
+
+        # Redirect home/config folders to the neutral temp directory to isolate local scans
+        env["HOME"] = temp_dir
+        if "USERPROFILE" in env:
+            env["USERPROFILE"] = temp_dir
+        if "APPDATA" in env:
+            env["APPDATA"] = os.path.join(temp_dir, "AppData", "Roaming")
+        if "LOCALAPPDATA" in env:
+            env["LOCALAPPDATA"] = os.path.join(temp_dir, "AppData", "Local")
+
+        logger.debug(f"Executing CLI command: {' '.join(cmd)} in sandboxed mode")
         try:
             # Create subprocess with neutral CWD to prevent local config scans
             if sys.platform == "win32":
@@ -202,6 +211,17 @@ class AntigravityCLIProvider(BaseCLIProvider):
             return
 
         process_group_id = pgid if pgid is not None else process.pid
+        if isinstance(process_group_id, (int, float)) and process_group_id <= 1:
+            logger.warning(
+                f"Invalid process group ID for termination: {process_group_id}. "
+                "Skipping group kill."
+            )
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            return
+
         try:
             os.killpg(process_group_id, signal.SIGTERM)
         except (ProcessLookupError, PermissionError):
