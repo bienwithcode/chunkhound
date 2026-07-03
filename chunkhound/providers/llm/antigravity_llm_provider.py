@@ -38,7 +38,7 @@ class AntigravityLLMProvider(LLMProvider):
         if not SDK_AVAILABLE:
             raise RuntimeError(
                 "google-antigravity SDK is not installed. "
-                "Please run `uv add google-antigravity` to install it."
+                "Please run `uv add \"chunkhound[antigravity]\"` to install it."
             )
         self._api_key = api_key
         self._model = model
@@ -247,6 +247,19 @@ class AntigravityLLMProvider(LLMProvider):
         if defs is None:
             defs = schema.get("$defs", {})
 
+        # Handle composition logic
+        from typing import Union
+        for comp_key in ("anyOf", "oneOf", "allOf"):
+            if comp_key in schema:
+                comp_schemas = schema[comp_key]
+                if isinstance(comp_schemas, list) and comp_schemas:
+                    types = []
+                    for i, s in enumerate(comp_schemas):
+                        t = self._compile_schema_to_pydantic(s, name=f"{name}_{comp_key}_{i}", defs=defs)
+                        types.append(t)
+                    if types:
+                        return Union[tuple(types)]
+
         properties = schema.get("properties", {})
         required = schema.get("required", [])
 
@@ -398,8 +411,11 @@ class AntigravityLLMProvider(LLMProvider):
                 async def _chat_and_drain():
                     res = await agent.chat(prompt)
                     structured_val = None
-                    if hasattr(res, "structured_output"):
-                        structured_val = await res.structured_output()
+                    try:
+                        if hasattr(res, "structured_output"):
+                            structured_val = await res.structured_output()
+                    except Exception as e:
+                        logger.warning(f"structured_output() failed: {e}. Falling back to text.")
                     text_content = ""
                     try:
                         text_content = await res.text()

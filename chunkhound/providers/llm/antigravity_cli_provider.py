@@ -53,12 +53,15 @@ class AntigravityCLIProvider(BaseCLIProvider):
 
         import shutil
 
-        binary = "agy"
-        if not shutil.which("agy") and shutil.which("antigravity"):
-            binary = "antigravity"
+        binary_path = shutil.which("agy")
+        if not binary_path:
+            binary_path = shutil.which("antigravity")
+            
+        if not binary_path:
+            raise FileNotFoundError("agy or antigravity")
 
         # Build CLI command
-        cmd = [binary, "--print", "--sandbox"]
+        cmd = [binary_path, "--print", "--sandbox"]
         if self._model:
             cmd.extend(["--model", self._model])
 
@@ -178,9 +181,10 @@ class AntigravityCLIProvider(BaseCLIProvider):
         """Terminate an antigravity subprocess and its descendants."""
         if sys.platform == "win32":
             try:
+                taskkill_path = shutil.which("taskkill") or "taskkill"
                 res = await asyncio.to_thread(
                     subprocess.run,
-                    ["taskkill", "/T", "/PID", str(process.pid), "/F"],
+                    [taskkill_path, "/T", "/PID", str(process.pid), "/F"],
                     capture_output=True,
                     check=False,
                     timeout=10,
