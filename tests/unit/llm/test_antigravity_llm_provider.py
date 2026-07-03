@@ -231,10 +231,10 @@ async def test_cli_complete_success(mock_subprocess):
     assert "CHUNKHOUND_TEST" not in env_passed
     assert "GOOGLE_APPLICATION_CREDENTIALS" not in env_passed
     assert env_passed.get("PATH") == "/usr/bin"
-    assert env_passed.get("HOME") == cwd_passed
-    assert env_passed.get("USERPROFILE") == cwd_passed
-    assert env_passed.get("APPDATA") == os.path.join(cwd_passed, "AppData", "Roaming")
-    assert env_passed.get("LOCALAPPDATA") == os.path.join(cwd_passed, "AppData", "Local")
+    assert env_passed.get("HOME") == "/home/user"
+    assert env_passed.get("USERPROFILE") == "C:\\Users\\user"
+    assert env_passed.get("APPDATA") == "C:\\Users\\user\\AppData\\Roaming"
+    assert env_passed.get("LOCALAPPDATA") == "C:\\Users\\user\\AppData\\Local"
 
 
 @pytest.mark.asyncio

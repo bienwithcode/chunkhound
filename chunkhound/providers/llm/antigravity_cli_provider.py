@@ -93,14 +93,10 @@ class AntigravityCLIProvider(BaseCLIProvider):
         captured_process_pid: int | None = None
         temp_dir = tempfile.mkdtemp(prefix="chunkhound-antigravity-")
 
-        # Redirect home/config folders to the neutral temp directory to isolate local scans
-        env["HOME"] = temp_dir
-        if "USERPROFILE" in env:
-            env["USERPROFILE"] = temp_dir
-        if "APPDATA" in env:
-            env["APPDATA"] = os.path.join(temp_dir, "AppData", "Roaming")
-        if "LOCALAPPDATA" in env:
-            env["LOCALAPPDATA"] = os.path.join(temp_dir, "AppData", "Local")
+        # Note: We intentionally preserve HOME, USERPROFILE, APPDATA, and LOCALAPPDATA
+        # rather than redirecting them to the temp directory. While this exposes user-level
+        # configuration to the CLI (a documented sandboxing tradeoff), it is strictly
+        # required for the CLI to locate its authentication credentials.
 
         logger.debug(f"Executing CLI command: {' '.join(cmd)} in sandboxed mode")
         try:
