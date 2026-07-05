@@ -46,7 +46,7 @@ def setup_embedding_llm(
     try:
         if config.llm:
             utility_config, synthesis_config = config.llm.get_provider_configs()
-            llm_manager = LLMManager(utility_config, synthesis_config)
+            llm_manager = LLMManager(utility_config, synthesis_config, target_dir=config.target_dir)
     except (ValueError, ConfigurationError) as e:
         formatter.error(f"LLM provider setup failed: {e}")
         formatter.info(
