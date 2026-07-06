@@ -174,9 +174,11 @@ class AntigravityCLIProvider(BaseCLIProvider):
                 raise RuntimeError(f"Antigravity CLI execution failed: {e}") from e
             raise
         finally:
-            if process:
-                await self._kill_process_tree(
-                    process, pgid=captured_process_pid, env=env
+            if process and process.returncode is None:
+                await asyncio.shield(
+                    self._kill_process_tree(
+                        process, pgid=captured_process_pid, env=env
+                    )
                 )
             try:
                 shutil.rmtree(temp_dir, ignore_errors=True)
