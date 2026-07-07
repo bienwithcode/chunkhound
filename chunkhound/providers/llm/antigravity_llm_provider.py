@@ -174,6 +174,8 @@ class AntigravityLLMProvider(LLMProvider):
                     )
                     res = await agent.chat(prompt)
                     content = await res.text()
+                    if not content or not content.strip():
+                        raise RuntimeError("Antigravity SDK returned an empty response")
 
                     # Extract thoughts/reasoning tokens
                     thoughts = getattr(res, "thoughts", "")
@@ -258,8 +260,12 @@ class AntigravityLLMProvider(LLMProvider):
 
             return await asyncio.wait_for(_run_session(), timeout=request_timeout)
         except asyncio.TimeoutError as e:
-            logger.error(f"Antigravity SDK call failed: timed out after {request_timeout}s")
-            raise RuntimeError(f"Antigravity SDK call failed: timed out after {request_timeout}s") from e
+            msg = (
+                "Antigravity SDK call failed: "
+                f"timed out after {request_timeout}s"
+            )
+            logger.error(msg)
+            raise RuntimeError(msg) from e
         except Exception as e:
             logger.error(f"Antigravity SDK call failed: {e}")
             raise RuntimeError(f"Antigravity SDK call failed: {e}") from e
@@ -814,8 +820,12 @@ class AntigravityLLMProvider(LLMProvider):
 
             return await asyncio.wait_for(_run_session(), timeout=request_timeout)
         except asyncio.TimeoutError as e:
-            logger.error(f"Antigravity SDK structured call failed: timed out after {request_timeout}s")
-            raise RuntimeError(f"Antigravity SDK structured call failed: timed out after {request_timeout}s") from e
+            msg = (
+                "Antigravity SDK structured call failed: "
+                f"timed out after {request_timeout}s"
+            )
+            logger.error(msg)
+            raise RuntimeError(msg) from e
         except Exception as e:
             logger.error(f"Antigravity SDK structured call failed: {e}")
             raise RuntimeError(f"Antigravity SDK structured call failed: {e}") from e
@@ -827,14 +837,18 @@ class AntigravityLLMProvider(LLMProvider):
         max_completion_tokens: int = 4096,
     ) -> list[LLMResponse]:
         """Generate completions for multiple prompts concurrently."""
-        tasks = [
-            self.complete(
-                prompt=prompt,
-                system=system,
-                max_completion_tokens=max_completion_tokens,
-            )
-            for prompt in prompts
-        ]
+        concurrency = self.get_synthesis_concurrency()
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def _bounded_complete(prompt: str) -> LLMResponse:
+            async with semaphore:
+                return await self.complete(
+                    prompt=prompt,
+                    system=system,
+                    max_completion_tokens=max_completion_tokens,
+                )
+
+        tasks = [_bounded_complete(prompt) for prompt in prompts]
         return list(await asyncio.gather(*tasks))
 
     def estimate_tokens(self, text: str) -> int:

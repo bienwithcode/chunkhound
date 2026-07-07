@@ -194,6 +194,7 @@ class AntigravityCLIProvider(BaseCLIProvider):
     ) -> None:
         """Terminate an antigravity subprocess and its descendants."""
         if sys.platform == "win32":
+            taskkill_success = False
             try:
                 taskkill_path = shutil.which("taskkill") or "taskkill"
                 res = await asyncio.to_thread(
@@ -210,11 +211,19 @@ class AntigravityCLIProvider(BaseCLIProvider):
                         f"{res.returncode}: "
                         f"{res.stderr.decode('utf-8', errors='ignore')}"
                     )
+                else:
+                    taskkill_success = True
             except (FileNotFoundError, subprocess.SubprocessError, OSError) as e:
-                logger.debug(f"Windows taskkill failed during Antigravity CLI cleanup: {e}")
+                logger.debug(
+                    f"Windows taskkill failed during Antigravity CLI cleanup: {e}"
+                )
+
             try:
                 await asyncio.wait_for(process.wait(), timeout=5)
             except (asyncio.TimeoutError, ProcessLookupError):
+                pass
+
+            if not taskkill_success:
                 try:
                     import psutil
 
