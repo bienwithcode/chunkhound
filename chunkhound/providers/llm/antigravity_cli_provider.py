@@ -216,9 +216,23 @@ class AntigravityCLIProvider(BaseCLIProvider):
                 await asyncio.wait_for(process.wait(), timeout=5)
             except (asyncio.TimeoutError, ProcessLookupError):
                 try:
-                    process.kill()
-                except ProcessLookupError:
-                    pass
+                    import psutil
+
+                    try:
+                        parent = psutil.Process(process.pid)
+                        for child in parent.children(recursive=True):
+                            try:
+                                child.kill()
+                            except psutil.NoSuchProcess:
+                                pass
+                        parent.kill()
+                    except psutil.NoSuchProcess:
+                        pass
+                except ImportError:
+                    try:
+                        process.kill()
+                    except ProcessLookupError:
+                        pass
                 try:
                     await asyncio.wait_for(process.wait(), timeout=5)
                 except (asyncio.TimeoutError, ProcessLookupError):

@@ -432,10 +432,7 @@ async def test_sdk_timeout(mock_antigravity_agent):
 
     _make_agent_mock(mock_antigravity_agent)
 
-    async def mock_wait_se(aws, timeout=None, return_when=None):
-        return set(), set(aws)
-
-    with patch("asyncio.wait", side_effect=mock_wait_se) as mock_wait:
+    with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError) as mock_wait:
         with pytest.raises(RuntimeError, match="Antigravity SDK call failed:"):
             await provider.complete("Test prompt", timeout=5)
 

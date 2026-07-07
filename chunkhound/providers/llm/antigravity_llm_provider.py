@@ -256,14 +256,7 @@ class AntigravityLLMProvider(LLMProvider):
                         finish_reason="stop",
                     )
 
-            session_task = asyncio.create_task(_run_session())
-            done, pending = await asyncio.wait(
-                [session_task], timeout=request_timeout
-            )
-            if pending:
-                session_task.cancel()
-                raise asyncio.TimeoutError()
-            return session_task.result()
+            return await asyncio.wait_for(_run_session(), timeout=request_timeout)
         except asyncio.TimeoutError as e:
             logger.error(f"Antigravity SDK call failed: timed out after {request_timeout}s")
             raise RuntimeError(f"Antigravity SDK call failed: timed out after {request_timeout}s") from e
@@ -819,14 +812,7 @@ class AntigravityLLMProvider(LLMProvider):
                     # Fallback to parsing text output
                     return _validate_text(text_content)
 
-            session_task = asyncio.create_task(_run_session())
-            done, pending = await asyncio.wait(
-                [session_task], timeout=request_timeout
-            )
-            if pending:
-                session_task.cancel()
-                raise asyncio.TimeoutError()
-            return session_task.result()
+            return await asyncio.wait_for(_run_session(), timeout=request_timeout)
         except asyncio.TimeoutError as e:
             logger.error(f"Antigravity SDK structured call failed: timed out after {request_timeout}s")
             raise RuntimeError(f"Antigravity SDK structured call failed: timed out after {request_timeout}s") from e
