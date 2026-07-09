@@ -19,6 +19,9 @@ except ImportError:
 class AntigravityLLMProvider(LLMProvider):
     """LLM provider wrapping the official google-antigravity SDK."""
 
+    # Constants
+    HEALTH_CHECK_TIMEOUT = 30  # Seconds to wait for the readiness probe
+
     def __init__(
         self,
         api_key: str | None = None,
@@ -321,6 +324,27 @@ class AntigravityLLMProvider(LLMProvider):
 
         return merged
 
+    def _cleanup_root_schema(
+        self, schema: Any, defs: dict[str, Any]
+    ) -> Any:
+        """Return the root schema the optional-null cleanup reads.
+
+        ``$ref``-resolves the root and, when a root ``allOf`` is present, merges
+        it via ``_merge_all_of`` (union of ``properties`` and ``required``) —
+        the same shape ``_compile_schema_to_pydantic`` hands the SDK. Without
+        this, ``_drop_optional_none`` sees no top-level
+        ``properties``/``required`` for a bare root ``allOf`` and drops valid
+        nullable fields before the final validation runs.
+
+        Root ``anyOf``/``oneOf`` are intentionally not merged here: the compiler
+        turns them into a ``typing.Union``, which the SDK's ``response_schema``
+        rejects at config-build time, so they never reach this cleanup path.
+        """
+        resolved = self._resolve_ref(schema, defs)
+        if isinstance(resolved, dict) and "allOf" in resolved:
+            return self._merge_all_of(resolved, defs)
+        return resolved
+
     def _compile_schema_to_pydantic(
         self, schema: Any, name: str = "DynamicResponseModel", defs: dict[str, Any] | None = None
     ) -> Any:
@@ -344,11 +368,7 @@ class AntigravityLLMProvider(LLMProvider):
         falls back to ``Any`` rather than ``str | None``, so the schema handed to
         the SDK is weaker than the caller's (the value is still enforced by the
         final JSON Schema validation against the original schema in
-        ``complete_structured``). See ``complete_structured`` for a related
-        limitation (d): its post-response optional-``null`` cleanup only
-        ``$ref``-resolves the root schema and does not merge a root composition
-        keyword, so a schema whose fields live entirely under a bare root
-        ``allOf`` is not seen by the cleanup.
+        ``complete_structured``).
         """
         from typing import Any, Literal
 
@@ -739,14 +759,11 @@ class AntigravityLLMProvider(LLMProvider):
                                 cleaned[k] = v
                         return cleaned
 
-                    # Limitation (d): the root schema is only ``$ref``-resolved
-                    # here, not ``allOf``-merged (unlike
-                    # ``_compile_schema_to_pydantic``). A schema whose fields
-                    # live entirely under a bare root ``allOf`` therefore has no
-                    # top-level ``properties``/``required`` for the cleanup to
-                    # read, so its optional nulls may be dropped. No current
-                    # caller emits root-composition schemas.
-                    root_schema = self._resolve_ref(json_schema, defs)
+                    # Merge a root ``allOf`` so _drop_optional_none can read
+                    # properties/required from the branch — matching what
+                    # _compile_schema_to_pydantic hands the SDK. See
+                    # ``_cleanup_root_schema`` for why anyOf/oneOf are excluded.
+                    root_schema = self._cleanup_root_schema(json_schema, defs)
 
                     def _validate_text(text: str) -> dict[str, Any]:
                         # Normalize optional-null the same way as the
@@ -848,8 +865,24 @@ class AntigravityLLMProvider(LLMProvider):
                     max_completion_tokens=max_completion_tokens,
                 )
 
-        tasks = [_bounded_complete(prompt) for prompt in prompts]
-        return list(await asyncio.gather(*tasks))
+        # Own the coroutines as Tasks so we can cancel siblings on failure.
+        # On the success path this is equivalent to the previous bare gather.
+        tasks = [asyncio.create_task(_bounded_complete(prompt)) for prompt in prompts]
+        try:
+            return list(await asyncio.gather(*tasks))
+        except BaseException:
+            # A failed batch must stop owning local SDK work: cancel any
+            # sibling prompts still awaiting SDK work so their ``Agent``
+            # sessions tear down via ``__aexit__`` rather than lingering as
+            # orphan tasks that keep touching the workspace after the caller
+            # has already received the batch error. Then re-raise the
+            # original exception unchanged (preserves RuntimeError type and
+            # caller-cancellation propagation).
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
 
     def estimate_tokens(self, text: str) -> int:
         """Estimate token count for text."""
@@ -858,7 +891,11 @@ class AntigravityLLMProvider(LLMProvider):
     async def health_check(self) -> dict[str, Any]:
         """Perform health check."""
         try:
-            response = await self.complete("ping", max_completion_tokens=4096)
+            response = await self.complete(
+                "ping",
+                max_completion_tokens=4096,
+                timeout=self.HEALTH_CHECK_TIMEOUT,
+            )
             return {
                 "status": "healthy",
                 "provider": self.name,

@@ -441,6 +441,75 @@ async def test_sdk_timeout(mock_antigravity_agent):
 
 
 @pytest.mark.asyncio
+async def test_batch_complete_cancels_siblings_on_failure(mock_antigravity_agent):
+    """A failed batch prompt must cancel still-running siblings so their
+    ``Agent`` sessions tear down via ``__aexit__`` instead of lingering as
+    orphan tasks that keep touching the workspace after the caller has the error.
+    """
+    provider = AntigravityLLMProvider(
+        api_key="test-api-key", model="gemini-3.5-flash",
+        target_dir="/tmp/chunkhound-test",
+    )
+
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def fake_complete(prompt, **_kwargs):
+        if prompt == "fail":
+            # Yield once so both prompts start before the failure propagates
+            # through ``asyncio.gather``.
+            await asyncio.sleep(0)
+            raise RuntimeError("boom")
+        started.set()
+        try:
+            # Simulate a sibling blocked inside ``res.text()``.
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        return LLMResponse(
+            content="slow-done", tokens_used=0,
+            model="gemini-3.5-flash", finish_reason="stop",
+        )
+
+    provider.complete = fake_complete  # type: ignore[assignment]
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await provider.batch_complete(["fail", "slow"])
+
+    assert started.is_set(), "slow sibling should have entered its session"
+    assert cancelled.is_set(), (
+        "slow sibling should be cancelled (session torn down) on batch failure, "
+        "not left running as an orphan task"
+    )
+
+
+@pytest.mark.asyncio
+async def test_health_check_uses_short_timeout(mock_antigravity_agent):
+    """Health checks must use a short readiness timeout (HEALTH_CHECK_TIMEOUT),
+    not the full request timeout, so an unhealthy SDK session fails fast."""
+    provider = AntigravityLLMProvider(
+        api_key="test-api-key", model="gemini-3.5-flash",
+        target_dir="/tmp/chunkhound-test",
+    )
+
+    assert provider.HEALTH_CHECK_TIMEOUT == 30
+
+    fake_response = LLMResponse(
+        content="pong", tokens_used=0,
+        model="gemini-3.5-flash", finish_reason="stop",
+    )
+    mock_complete = AsyncMock(return_value=fake_response)
+    provider.complete = mock_complete  # type: ignore[assignment]
+
+    result = await provider.health_check()
+
+    mock_complete.assert_awaited_once()
+    assert mock_complete.call_args.kwargs["timeout"] == provider.HEALTH_CHECK_TIMEOUT
+    assert result["status"] == "healthy"
+
+
+@pytest.mark.asyncio
 async def test_sdk_security_constraints(mock_antigravity_agent):
     provider = AntigravityLLMProvider(
         api_key="test-api-key", model="gemini-3.5-flash", target_dir="/tmp/chunkhound-test"
@@ -638,6 +707,39 @@ async def test_sdk_structured_optional_nullable_null_preserved(mock_antigravity_
 
     result = await provider.complete_structured("Structured prompt", json_schema=schema)
     # Optional + nullable: the explicit null is a valid answer and must survive.
+    assert result == {"a": None}
+
+
+@pytest.mark.asyncio
+async def test_sdk_structured_root_allof_nullable_null_preserved(mock_antigravity_agent):
+    """An optional nullable field declared only under a bare root ``allOf``
+    branch must keep an explicit null. Earlier the cleanup only ``$ref``-resolved
+    the root and dropped it (root-composition cleanup)."""
+    provider = AntigravityLLMProvider(
+        api_key="test-api-key", model="gemini-3.5-flash", target_dir="/tmp/chunkhound-test"
+    )
+
+    agent_mock = _make_agent_mock(mock_antigravity_agent)
+    response = MagicMock()
+    response.structured_output = AsyncMock(return_value={"a": None})
+    response.text = AsyncMock(return_value="")
+    response.thoughts = ""
+    agent_mock.chat = AsyncMock(return_value=response)
+    agent_mock.conversation = MagicMock()
+
+    schema = {
+        "$defs": {
+            "Base": {
+                "type": "object",
+                "properties": {"a": {"type": ["string", "null"]}},
+                "required": [],
+            }
+        },
+        "allOf": [{"$ref": "#/$defs/Base"}],
+    }
+
+    result = await provider.complete_structured("Structured prompt", json_schema=schema)
+    # Optional + nullable under a bare root allOf: the explicit null must survive.
     assert result == {"a": None}
 
 
