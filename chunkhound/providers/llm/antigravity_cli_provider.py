@@ -107,7 +107,21 @@ class AntigravityCLIProvider(BaseCLIProvider):
         # configuration to the CLI (a documented sandboxing tradeoff), it is strictly
         # required for the CLI to locate its authentication credentials.
 
-        logger.debug(f"Executing CLI command: {' '.join(cmd)} in sandboxed mode")
+        # Redact the prompt from the debug log: the merged prompt can carry
+        # source snippets, paths, or secrets from the user's workspace, so it
+        # must never reach process-level debug logs. Only the binary and flags
+        # are logged; the prompt is summarized by length.
+        loggable_cmd = [
+            binary_path,
+            "--sandbox",
+            "--print",
+            f"<prompt:{len(merged_prompt)} chars redacted>",
+        ]
+        if self._model:
+            loggable_cmd.extend(["--model", self._model])
+        logger.debug(
+            f"Executing CLI command: {' '.join(loggable_cmd)} in sandboxed mode"
+        )
         try:
             # Create subprocess with neutral CWD to prevent local config scans
             if sys.platform == "win32":
@@ -175,9 +189,7 @@ class AntigravityCLIProvider(BaseCLIProvider):
         finally:
             if process and process.returncode is None:
                 await asyncio.shield(
-                    self._kill_process_tree(
-                        process, pgid=captured_process_pid, env=env
-                    )
+                    self._kill_process_tree(process, pgid=captured_process_pid, env=env)
                 )
             try:
                 shutil.rmtree(temp_dir, ignore_errors=True)
