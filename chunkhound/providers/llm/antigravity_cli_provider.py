@@ -66,13 +66,13 @@ class AntigravityCLIProvider(BaseCLIProvider):
                 "Ensure it is installed and configured in your system PATH."
             )
 
-        # Build CLI command
-        cmd = [binary_path, "--print", "--sandbox"]
-        if self._model:
-            cmd.extend(["--model", self._model])
-
         # Merge system prompt if provided
         merged_prompt = self._merge_prompts(prompt, system)
+
+        # Build CLI command
+        cmd = [binary_path, "--sandbox", "--print", merged_prompt]
+        if self._model:
+            cmd.extend(["--model", self._model])
 
         # Clone and sanitize environment variables to prevent credentials/plugin hijacking
         safe_keys = {
@@ -137,10 +137,9 @@ class AntigravityCLIProvider(BaseCLIProvider):
             if sys.platform != "win32":
                 captured_process_pid = process.pid
 
-            # Wait for completion and stream prompt via stdin
-            # (bypasses OS arg length limits)
+            # Wait for completion
             stdout, stderr = await asyncio.wait_for(
-                process.communicate(input=merged_prompt.encode("utf-8")),
+                process.communicate(),
                 timeout=request_timeout,
             )
 
