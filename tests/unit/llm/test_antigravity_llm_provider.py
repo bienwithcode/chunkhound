@@ -348,8 +348,10 @@ async def test_cli_complete_success(mock_subprocess):
     mock_subprocess.assert_called_once()
     cmd_args = mock_subprocess.call_args.args
     assert cmd_args[0].endswith("agy") or cmd_args[0].endswith("antigravity")
-    assert "--print" in cmd_args
     assert "--sandbox" in cmd_args
+    # --print must NOT be used: it would leak the prompt onto argv and make agy
+    # consume the following flag as the prompt (agy reads the prompt from stdin).
+    assert "--print" not in cmd_args
     assert "--model" in cmd_args
     assert cmd_args[cmd_args.index("--model") + 1] == "gemini-3.5-flash"
 
@@ -368,6 +370,70 @@ async def test_cli_complete_success(mock_subprocess):
     assert env_passed.get("USERPROFILE") == "C:\\Users\\user"
     assert env_passed.get("APPDATA") == "C:\\Users\\user\\AppData\\Roaming"
     assert env_passed.get("LOCALAPPDATA") == "C:\\Users\\user\\AppData\\Local"
+
+
+@pytest.mark.asyncio
+async def test_cli_prompt_sent_via_stdin_not_argv(mock_subprocess):
+    """The prompt (and merged system instructions) must be delivered over stdin,
+    never as a command-line argument — otherwise workspace source snippets, file
+    paths, and secrets leak into process listings (`ps`). agy reads the piped,
+    non-TTY stdin as the prompt when no prompt flag is passed."""
+    provider = AntigravityCLIProvider(model="gemini-3.5-flash")
+
+    mock_process = AsyncMock()
+    mock_process.pid = 12345
+    mock_process.returncode = 0
+    mock_process.communicate.return_value = (b"ok", b"")
+    mock_subprocess.return_value = mock_process
+
+    prompt = "SENSITIVE-PROMPT-XYZ"
+    system = "SYS-INSTR-ABC"
+    with patch("shutil.which", return_value="/usr/local/bin/agy"):
+        await provider.complete(prompt, system=system)
+
+    # The prompt must not appear anywhere in argv.
+    cmd_args = mock_subprocess.call_args.args
+    assert not any(prompt in str(arg) for arg in cmd_args)
+    assert not any(system in str(arg) for arg in cmd_args)
+
+    # The merged prompt must be piped via stdin instead.
+    stdin_input = mock_process.communicate.call_args.kwargs.get("input")
+    assert stdin_input is not None
+    decoded = stdin_input.decode("utf-8")
+    assert prompt in decoded
+    assert system in decoded
+
+
+@pytest.mark.asyncio
+async def test_cli_temp_dir_removed_on_cancellation(mock_subprocess):
+    """If the task is cancelled while the process tree is being torn down, the
+    per-call temp working directory must still be removed (no leak)."""
+    provider = AntigravityCLIProvider(model="gemini-3.5-flash")
+
+    mock_process = AsyncMock()
+    mock_process.pid = 12345
+    mock_process.returncode = None  # forces the kill branch in the finally block
+    # Simulate the task being cancelled while the subprocess call is pending.
+    mock_process.communicate.side_effect = asyncio.CancelledError()
+    mock_subprocess.return_value = mock_process
+
+    with (
+        patch("shutil.which", return_value="/usr/local/bin/agy"),
+        # Reproduce the reported bug shape: cancellation re-raised from the
+        # shielded process-tree teardown must not skip temp-dir removal.
+        patch.object(
+            provider,
+            "_kill_process_tree",
+            AsyncMock(side_effect=asyncio.CancelledError()),
+        ),
+    ):
+        with pytest.raises(asyncio.CancelledError):
+            await provider._run_cli_command("prompt")
+
+    cwd_passed = mock_subprocess.call_args.kwargs.get("cwd")
+    assert cwd_passed is not None
+    assert "chunkhound-antigravity-" in os.path.basename(cwd_passed)
+    assert not os.path.exists(cwd_passed), "temp dir leaked after cancellation"
 
 
 @pytest.mark.asyncio
@@ -396,8 +462,10 @@ async def test_cli_debug_log_redacts_prompt(mock_subprocess):
         str(call.args[0]) for call in mock_debug.call_args_list if call.args
     )
     assert secret not in logged, "prompt content leaked into the CLI debug log"
-    assert "--sandbox" in logged and "--print" in logged
-    assert "redacted" in logged
+    assert "--sandbox" in logged
+    # Prompt travels via stdin, so it is neither on argv nor in the log; the log
+    # only notes its length.
+    assert "stdin" in logged
 
 
 @pytest.mark.asyncio
@@ -476,6 +544,11 @@ async def test_cli_timeout_cleanup(mock_subprocess):
         assert "12345" in args
     else:
         mock_killpg.assert_any_call(12345, signal.SIGTERM)
+
+    # The per-call temp working directory must be removed even on the timeout path.
+    cwd_passed = mock_subprocess.call_args.kwargs.get("cwd")
+    assert cwd_passed is not None
+    assert not os.path.exists(cwd_passed), "temp dir leaked after timeout"
 
 
 @pytest.mark.asyncio

@@ -69,8 +69,17 @@ class AntigravityCLIProvider(BaseCLIProvider):
         # Merge system prompt if provided
         merged_prompt = self._merge_prompts(prompt, system)
 
-        # Build CLI command
-        cmd = [binary_path, "--sandbox", "--print", merged_prompt]
+        # Build CLI command. The prompt is delivered via stdin and NOT via the
+        # --print flag. agy v1.1.1 changed print-mode input handling: when a
+        # prompt is supplied through a flag it "no longer reads stdin" (changelog
+        # 1.1.1), and --print/-p consume the following argv token as their value.
+        # So including --print here both (a) leaks the prompt into process
+        # listings and (b) makes agy swallow the next flag (e.g. --model) as the
+        # prompt. Omitting --print lets agy auto-detect the piped, non-TTY stdin
+        # and run headless, reading the prompt from stdin — keeping source
+        # snippets, paths, and secrets out of argv/`ps` and avoiding ARG_MAX
+        # limits, consistent with the other CLI providers.
+        cmd = [binary_path, "--sandbox"]
         if self._model:
             cmd.extend(["--model", self._model])
 
@@ -107,20 +116,13 @@ class AntigravityCLIProvider(BaseCLIProvider):
         # configuration to the CLI (a documented sandboxing tradeoff), it is strictly
         # required for the CLI to locate its authentication credentials.
 
-        # Redact the prompt from the debug log: the merged prompt can carry
-        # source snippets, paths, or secrets from the user's workspace, so it
-        # must never reach process-level debug logs. Only the binary and flags
-        # are logged; the prompt is summarized by length.
-        loggable_cmd = [
-            binary_path,
-            "--sandbox",
-            "--print",
-            f"<prompt:{len(merged_prompt)} chars redacted>",
-        ]
-        if self._model:
-            loggable_cmd.extend(["--model", self._model])
+        # The prompt is delivered via stdin, so it is not part of cmd and cannot
+        # leak through this log. Only the binary and flags are logged; the prompt
+        # is never logged (it can carry source snippets, paths, or secrets from
+        # the user's workspace) and is summarized by length.
         logger.debug(
-            f"Executing CLI command: {' '.join(loggable_cmd)} in sandboxed mode"
+            f"Executing CLI command: {' '.join(cmd)} "
+            f"(prompt via stdin: {len(merged_prompt)} chars) in sandboxed mode"
         )
         try:
             # Create subprocess with neutral CWD to prevent local config scans
@@ -151,9 +153,11 @@ class AntigravityCLIProvider(BaseCLIProvider):
             if sys.platform != "win32":
                 captured_process_pid = process.pid
 
-            # Wait for completion
+            # Wait for completion. The prompt is written to stdin (agy reads the
+            # piped, non-TTY stdin as the prompt when no prompt flag is given);
+            # communicate() writes it, closes stdin (EOF), and drains stdout/stderr.
             stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
+                process.communicate(input=merged_prompt.encode("utf-8")),
                 timeout=request_timeout,
             )
 
@@ -187,14 +191,19 @@ class AntigravityCLIProvider(BaseCLIProvider):
                 raise RuntimeError(f"Antigravity CLI execution failed: {e}") from e
             raise
         finally:
-            if process and process.returncode is None:
-                await asyncio.shield(
-                    self._kill_process_tree(process, pgid=captured_process_pid, env=env)
-                )
             try:
+                if process and process.returncode is None:
+                    await asyncio.shield(
+                        self._kill_process_tree(
+                            process, pgid=captured_process_pid, env=env
+                        )
+                    )
+            finally:
+                # Runs even if the shielded await above re-raises CancelledError
+                # (cancellation during process-tree teardown), so the per-call temp
+                # working directory is never leaked. rmtree with ignore_errors=True
+                # is synchronous and cannot itself raise.
                 shutil.rmtree(temp_dir, ignore_errors=True)
-            except Exception:
-                pass
 
     async def _kill_process_tree(
         self,
