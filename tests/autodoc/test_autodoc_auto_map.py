@@ -261,7 +261,9 @@ async def test_autodoc_auto_map_prereq_failure_exits_before_prompting_map_params
 
     async def fake_run_code_mapper_for_autodoc(**_kwargs):  # type: ignore[no-untyped-def]
         ran_map.append(Path("should-not-run"))
-        return autorun._build_auto_map_plan(output_dir=tmp_path / "autodoc")  # type: ignore[attr-defined]
+        return autorun._build_auto_map_plan(  # type: ignore[attr-defined]
+            output_dir=tmp_path / "autodoc"
+        )
 
     monkeypatch.setattr(
         autorun,

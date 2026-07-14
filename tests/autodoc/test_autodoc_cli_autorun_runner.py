@@ -48,7 +48,7 @@ async def test_autorun_code_mapper_for_autodoc_returns_plan_out_dir(
 
     out_dir = await autorun.autorun_code_mapper_for_autodoc(
         args=args,
-        config=SimpleNamespace(),  # type: ignore[arg-type]
+        config=SimpleNamespace(target_dir=tmp_path),  # type: ignore[arg-type]
         formatter=formatter,  # type: ignore[arg-type]
         output_dir=tmp_path / "site",
         question="Proceed?",

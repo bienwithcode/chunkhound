@@ -18,6 +18,7 @@ from ..utils.rich_output import RichOutputFormatter
 from ..utils.tree_progress import TreeProgressDisplay
 
 
+
 async def run_research(
     services: DatabaseServices,
     embedding_manager: EmbeddingManager,
